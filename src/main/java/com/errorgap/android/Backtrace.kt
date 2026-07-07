@@ -1,4 +1,4 @@
-package io.errorgap.android
+package com.errorgap.android
 
 object Backtrace {
     fun fromThrowable(throwable: Throwable): List<Map<String, Any?>> {

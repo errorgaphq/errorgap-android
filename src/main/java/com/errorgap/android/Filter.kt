@@ -1,4 +1,4 @@
-package io.errorgap.android
+package com.errorgap.android
 
 internal object Filter {
     const val FILTERED = "[FILTERED]"

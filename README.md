@@ -15,7 +15,7 @@ Requires Kotlin 1.9+, JDK 17 for build, Android API 24+ at runtime.
 
 ```kotlin
 dependencies {
-    implementation("io.errorgap:errorgap-android:0.1.0")
+    implementation("com.errorgap:errorgap-android:0.1.0")
 }
 ```
 
@@ -24,8 +24,8 @@ dependencies {
 In your `Application.onCreate()`:
 
 ```kotlin
-import io.errorgap.android.Errorgap
-import io.errorgap.android.ErrorgapConfiguration
+import com.errorgap.android.Errorgap
+import com.errorgap.android.ErrorgapConfiguration
 import android.os.Build
 
 class App : Application() {

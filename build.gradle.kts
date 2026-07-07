@@ -6,7 +6,7 @@ plugins {
     id("com.vanniktech.maven.publish") version "0.30.0"
 }
 
-group = "io.errorgap"
+group = "com.errorgap"
 version = "0.1.0"
 
 java {
@@ -34,7 +34,7 @@ tasks.test {
 mavenPublishing {
     publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL, automaticRelease = true)
     signAllPublications()
-    coordinates("io.errorgap", "errorgap-android", version.toString())
+    coordinates("com.errorgap", "errorgap-android", version.toString())
     pom {
         name.set("Errorgap Android / Kotlin")
         description.set("Kotlin notifier for Errorgap error tracking.")

@@ -1,4 +1,4 @@
-package io.errorgap.android
+package com.errorgap.android
 
 object Errorgap {
     @Volatile private var client: ErrorgapClient? = null

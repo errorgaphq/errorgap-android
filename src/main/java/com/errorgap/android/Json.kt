@@ -1,4 +1,4 @@
-package io.errorgap.android
+package com.errorgap.android
 
 /**
  * Minimal JSON encoder for the notice envelope. Avoids a runtime

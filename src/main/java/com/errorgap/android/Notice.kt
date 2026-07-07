@@ -1,4 +1,4 @@
-package io.errorgap.android
+package com.errorgap.android
 
 import java.time.Instant
 

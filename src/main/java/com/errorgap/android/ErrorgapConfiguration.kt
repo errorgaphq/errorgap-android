@@ -1,4 +1,4 @@
-package io.errorgap.android
+package com.errorgap.android
 
 data class ErrorgapConfiguration(
     val endpoint: String = System.getenv("ERRORGAP_ENDPOINT") ?: "http://127.0.0.1:3030",

@@ -1,4 +1,4 @@
-package io.errorgap.android
+package com.errorgap.android
 
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
