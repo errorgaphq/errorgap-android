@@ -54,4 +54,31 @@ class NoticeTests {
         val notice = Notice.build(RuntimeException("x"), cfg())
         assertEquals("p_1", notice["project_id"])
     }
+
+    @Test fun includesInlineKotlinSource() {
+        val notice = Notice.build(
+            RuntimeException("source excerpt"),
+            cfg().copy(
+                rootDirectory = System.getProperty("user.dir"),
+                inAppPackages = listOf("com.errorgap.android"),
+            ),
+        )
+        @Suppress("UNCHECKED_CAST")
+        val errors = notice["errors"] as List<Map<String, Any?>>
+        @Suppress("UNCHECKED_CAST")
+        val frames = errors[0]["backtrace"] as List<Map<String, Any?>>
+        @Suppress("UNCHECKED_CAST")
+        val source = frames.firstNotNullOfOrNull { it["source"] as? Map<String, Any?> }
+        assertNotNull(source)
+        assertTrue((source!!["lines"] as List<*>).any { it.toString().contains("source excerpt") })
+    }
+
+    @Test fun honorsExplicitInAppPackagePrefixes() {
+        val frames = Backtrace.fromThrowable(
+            RuntimeException("x"),
+            System.getProperty("user.dir"),
+            listOf("com.example.application"),
+        )
+        assertTrue(frames.none { it["in_app"] == true })
+    }
 }

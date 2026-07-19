@@ -1,7 +1,8 @@
 # errorgap-android
 
 Kotlin notifier for [Errorgap](https://errorgap.com). Reports uncaught
-exceptions and manual errors from Android apps.
+exceptions and manual errors from Android apps, records APM transactions and
+background jobs, and forwards structured logs.
 
 This v1 is a plain Kotlin/JVM library so it can be unit-tested on any
 JVM without Android tooling. It works on Android because it uses only
@@ -15,7 +16,7 @@ Requires Kotlin 1.9+, JDK 17 for build, Android API 24+ at runtime.
 
 ```kotlin
 dependencies {
-    implementation("com.errorgap:errorgap-android:0.1.0")
+    implementation("com.errorgap:errorgap-android:0.2.0")
 }
 ```
 
@@ -70,6 +71,68 @@ try {
 `notify` returns a `DeliveryResult` (`status`, `body`, `error`, `queued`).
 The SDK never throws.
 
+Backtrace frames include Kotlin/Java source excerpts when the source is
+available below `rootDirectory` or as a classpath/source-JAR resource. Use
+`inAppPackages` to distinguish application frames from vendor code:
+
+```kotlin
+ErrorgapConfiguration(
+    projectSlug = "your-project",
+    rootDirectory = projectDir.absolutePath,
+    inAppPackages = listOf("com.example.myapp"),
+)
+```
+
+## APM
+
+Enable APM with `apmEnabled = true` (or `ERRORGAP_APM_ENABLED=true`) and send
+web transactions with optional database or outbound HTTP spans:
+
+```kotlin
+Errorgap.notifyTransaction(
+    ApmTransaction(
+        method = "POST",
+        path = "/orders/{id}",
+        statusCode = 201,
+        durationMs = 42.5,
+        spans = listOf(
+            ApmSpan.database(
+                "select * from orders where id = 42",
+                durationMs = 3.2,
+                file = "com/example/Orders.kt",
+                line = 41,
+                function = "com.example.Orders.find",
+            ),
+        ),
+    ),
+)
+```
+
+`ApmSpan.database` normalizes SQL literals for aggregation. Background jobs can
+be measured and failed jobs reported automatically:
+
+```kotlin
+Errorgap.trackJob("com.example.ReceiptJob", "critical") { spans ->
+    spans.database("select 7 where id = 42", 2.1)
+    runReceiptJob()
+}
+```
+
+## Logs
+
+Enable log forwarding with `logsEnabled = true` and configure
+`minimumLogLevel` (`trace`, `debug`, `info`, `warn`, `error`, or `fatal`):
+
+```kotlin
+Errorgap.notifyLog("payment gateway timeout", "warn", "CheckoutActivity")
+```
+
+For `java.util.logging`, attach the dependency-free bridge:
+
+```kotlin
+Logger.getLogger("").addHandler(ErrorgapLogHandler())
+```
+
 ## Configuration reference
 
 | Field | Default | Notes |
@@ -80,11 +143,17 @@ The SDK never throws.
 | `apiKey` | `ERRORGAP_API_KEY` | Sent as `x-errorgap-project-key` |
 | `environment` | `ERRORGAP_ENVIRONMENT` or `production` | |
 | `release` | — | |
+| `rootDirectory` | JVM working directory | Source lookup root |
+| `inAppPackages` | empty | Package prefixes classified as application code |
 | `async` | `true` | Background daemon thread |
 | `filterKeys` | `password, token, …` | Substring, case-insensitive |
 | `timeoutMs` | `5000` | HTTP request timeout |
 | `queueSize` | `100` | Bounded notice queue |
 | `deviceInfo` | `emptyMap()` | Caller-supplied; see Configure |
+| `apmEnabled` | `ERRORGAP_APM_ENABLED` or `false` | Send APM transactions |
+| `apmSampleRate` | `ERRORGAP_APM_SAMPLE_RATE` or `1` | Clamped to `0..1` |
+| `logsEnabled` | `ERRORGAP_LOGS_ENABLED` or `false` | Forward structured logs |
+| `minimumLogLevel` | `ERRORGAP_MINIMUM_LOG_LEVEL` or `warn` | Client-side log threshold |
 
 ## Graceful shutdown
 

@@ -26,6 +26,35 @@ object Errorgap {
 
     @JvmStatic
     @JvmOverloads
+    fun notifyTransaction(
+        transaction: ApmTransaction,
+        sync: Boolean = false,
+    ): DeliveryResult = client?.notifyTransaction(transaction, sync)
+        ?: DeliveryResult(error = IllegalStateException("Errorgap not initialized"))
+
+    @JvmStatic
+    @JvmOverloads
+    fun notifyLog(
+        message: String,
+        level: String = "info",
+        source: String? = null,
+        sync: Boolean = false,
+    ): DeliveryResult = client?.notifyLog(message, level, source, sync)
+        ?: DeliveryResult(error = IllegalStateException("Errorgap not initialized"))
+
+    @JvmStatic
+    @JvmOverloads
+    fun <T> trackJob(
+        jobClass: String,
+        queue: String = "default",
+        operation: (SpanCollector) -> T,
+    ): T {
+        val activeClient = client ?: throw IllegalStateException("Errorgap not initialized")
+        return activeClient.trackJob(jobClass, queue, operation)
+    }
+
+    @JvmStatic
+    @JvmOverloads
     fun flush(timeoutMs: Long = 5_000): Unit = client?.flush(timeoutMs) ?: Unit
 
     @JvmStatic

@@ -1,7 +1,5 @@
 package com.errorgap.android
 
-import java.time.Instant
-
 data class NoticeOptions(
     val context: Map<String, Any?>? = null,
     val environment: Map<String, Any?>? = null,
@@ -23,6 +21,7 @@ object Notice {
             "environment" to config.environment,
         )
         config.release?.let { defaultContext["release"] = it }
+        config.rootDirectory?.let { defaultContext["root_directory"] = it }
         options.context?.let { defaultContext.putAll(it) }
 
         val defaultEnvironment = mutableMapOf<String, Any?>()
@@ -32,11 +31,15 @@ object Notice {
         val errorEntry = mapOf(
             "type" to throwable.javaClass.simpleName.ifEmpty { throwable.javaClass.name },
             "message" to (throwable.message ?: ""),
-            "backtrace" to Backtrace.fromThrowable(throwable),
+            "backtrace" to Backtrace.fromThrowable(
+                throwable,
+                config.rootDirectory,
+                config.inAppPackages,
+            ),
         )
 
         val notice = linkedMapOf<String, Any?>(
-            "received_at" to Instant.now().toString(),
+            "received_at" to isoTimestamp(),
             "errors" to listOf(errorEntry),
             "context" to defaultContext,
             "environment" to defaultEnvironment,
