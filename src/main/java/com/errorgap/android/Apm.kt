@@ -55,9 +55,12 @@ data class ApmTransaction(
     val spans: List<ApmSpan> = emptyList(),
     val jobClass: String? = null,
     val queue: String? = null,
+    /** Links errors raised during this transaction to it; see [ErrorgapTransactionContext]. */
+    val id: String = java.util.UUID.randomUUID().toString(),
 ) {
     internal fun toMap(configuration: ErrorgapConfiguration): Map<String, Any?> =
         linkedMapOf<String, Any?>(
+            "id" to id,
             "kind" to kind,
             "duration_ms" to durationMs,
             "environment" to (environment ?: configuration.environment),

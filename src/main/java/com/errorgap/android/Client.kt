@@ -45,7 +45,7 @@ class ErrorgapClient(
     ): DeliveryResult {
         return try {
             configuration.validate()
-            val notice = Notice.build(throwable, configuration, options)
+            val notice = Notice.build(throwable, configuration, withTransaction(options))
             submit(Delivery("notices", notice), sync)
         } catch (caught: Throwable) {
             DeliveryResult(error = caught)
@@ -109,12 +109,13 @@ class ErrorgapClient(
         queue: String = "default",
         operation: (SpanCollector) -> T,
     ): T {
+        val transactionId = java.util.UUID.randomUUID().toString()
         val startedAt = isoTimestamp()
         val started = System.nanoTime()
         val collector = SpanCollector()
         var failed = false
         try {
-            return operation(collector)
+            return ErrorgapTransactionContext.run(transactionId) { operation(collector) }
         } catch (throwable: Throwable) {
             failed = true
             notify(
@@ -124,6 +125,7 @@ class ErrorgapClient(
                         "source" to "errorgap-android job",
                         "component" to "android.job",
                         "action" to jobClass,
+                        "transaction_id" to transactionId,
                     ),
                     environment = mapOf("queue" to queue),
                 ),
@@ -139,6 +141,7 @@ class ErrorgapClient(
                     spans = collector.snapshot(),
                     jobClass = jobClass,
                     queue = queue,
+                    id = transactionId,
                 ),
             )
         }
@@ -240,4 +243,14 @@ class ErrorgapClient(
         "fatal" -> 50
         else -> 20
     }
+}
+
+/**
+ * The transaction this error was raised in ([ErrorgapTransactionContext]),
+ * unless the caller set one, so errorgap links the two.
+ */
+private fun withTransaction(options: NoticeOptions): NoticeOptions {
+    val id = ErrorgapTransactionContext.current() ?: return options
+    if (options.context?.containsKey("transaction_id") == true) return options
+    return options.copy(context = (options.context ?: emptyMap()) + ("transaction_id" to id))
 }
