@@ -16,7 +16,7 @@ Requires Kotlin 1.9+, JDK 17 for build, Android API 24+ at runtime.
 
 ```kotlin
 dependencies {
-    implementation("com.errorgap:errorgap-android:0.2.0")
+    implementation("com.errorgap:errorgap-android:0.3.0")
 }
 ```
 
@@ -117,6 +117,22 @@ Errorgap.trackJob("com.example.ReceiptJob", "critical") { spans ->
     runReceiptJob()
 }
 ```
+
+### Link errors to their transaction
+
+Every `ApmTransaction` has an `id`. Errors reported inside
+`ErrorgapTransactionContext.run(id) { ... }` — and a failing `trackJob` —
+carry it as `context.transaction_id`, so errorgap shows the error an
+interaction raised on its trace:
+
+```kotlin
+val transaction = ApmTransaction(path = "/checkout", durationMs = 0.0)
+ErrorgapTransactionContext.run(transaction.id) { submitOrder() }
+```
+
+The id is thread-local; for work that hops threads (coroutines on another
+dispatcher), pass it explicitly:
+`NoticeOptions(context = mapOf("transaction_id" to transaction.id))`.
 
 ## Logs
 
