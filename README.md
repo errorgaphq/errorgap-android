@@ -16,7 +16,7 @@ Requires Kotlin 1.9+, JDK 17 for build, Android API 24+ at runtime.
 
 ```kotlin
 dependencies {
-    implementation("com.errorgap:errorgap-android:0.3.0")
+    implementation("com.errorgap:errorgap-android:0.4.0")
 }
 ```
 
@@ -117,6 +117,35 @@ Errorgap.trackJob("com.example.ReceiptJob", "critical") { spans ->
     runReceiptJob()
 }
 ```
+
+### Link API calls to server traces
+
+Trace a call to your API and errorgap links it to the server request that
+answered it (when the server's errorgap SDK records the `x-errorgap-trace`
+header — Rails, Laravel, Express, Django, Spring and the rest do):
+
+```kotlin
+val spans = SpanCollector()
+val started = System.nanoTime()
+val response = spans.traceCall("GET /api/orders/7") { headers ->
+    val request = Request.Builder().url(ordersUrl).apply {
+        headers.forEach { (name, value) -> header(name, value) }
+    }.build()
+    okHttp.newCall(request).execute()
+}
+Errorgap.notifyTransaction(
+    ApmTransaction(
+        path = "OrderScreen",
+        durationMs = (System.nanoTime() - started) / 1_000_000.0,
+        spans = spans.snapshot(),
+    ),
+)
+```
+
+`traceCall` records an `http` span carrying the trace id it sent; the app's
+trace lists each traced call with a link to its server trace, and the server
+trace shows how long the app waited. For manual timing use
+`val call = spans.startCall(label)`, send `call.headers`, then `call.finish()`.
 
 ### Link errors to their transaction
 
