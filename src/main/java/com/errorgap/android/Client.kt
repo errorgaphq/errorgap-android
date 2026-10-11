@@ -20,7 +20,18 @@ data class DeliveryResult(
 class ErrorgapClient(
     @Volatile private var configuration: ErrorgapConfiguration,
 ) {
-    private data class Delivery(val resource: String, val payload: Map<String, Any?>)
+    private data class Delivery(
+        val resource: String,
+        val payload: Map<String, Any?>,
+        /** Told the result once the server has answered (session replay links the error to its group). */
+        val onDelivered: ((DeliveryResult) -> Unit)? = null,
+    )
+
+    /**
+     * Session replay records each reported error, linked to its group: told the
+     * error's label, it returns what to call with the group id.
+     */
+    @Volatile internal var errorObserver: ((String) -> (String?) -> Unit)? = null
 
     private val queue: LinkedBlockingQueue<Delivery> =
         LinkedBlockingQueue(configuration.queueSize)
@@ -46,7 +57,13 @@ class ErrorgapClient(
         return try {
             configuration.validate()
             val notice = Notice.build(throwable, configuration, withTransaction(options))
-            submit(Delivery("notices", notice), sync)
+            val observed = errorObserver?.let { observer ->
+                @Suppress("UNCHECKED_CAST")
+                val first = (notice["errors"] as? List<Map<String, Any?>>)?.firstOrNull()
+                runCatching { observer("${first?.get("type") ?: "Error"}: ${first?.get("message") ?: throwable.message}") }
+                    .getOrNull()
+            }
+            submit(Delivery("notices", notice) { result -> observed?.invoke(groupIdOf(result)) }, sync)
         } catch (caught: Throwable) {
             DeliveryResult(error = caught)
         }
@@ -194,6 +211,12 @@ class ErrorgapClient(
     }
 
     private fun deliver(delivery: Delivery): DeliveryResult {
+        val result = send(delivery)
+        delivery.onDelivered?.let { runCatching { it(result) } }
+        return result
+    }
+
+    private fun send(delivery: Delivery): DeliveryResult {
         val body = Json.encode(delivery.payload).toByteArray()
         val url = URL(resourceUrl(delivery.resource))
         val connection = url.openConnection() as HttpURLConnection
