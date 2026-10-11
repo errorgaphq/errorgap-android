@@ -16,7 +16,7 @@ Requires Kotlin 1.9+, JDK 17 for build, Android API 24+ at runtime.
 
 ```kotlin
 dependencies {
-    implementation("com.errorgap:errorgap-android:0.4.0")
+    implementation("com.errorgap:errorgap-android:0.5.0")
 }
 ```
 
@@ -177,6 +177,76 @@ For `java.util.logging`, attach the dependency-free bridge:
 ```kotlin
 Logger.getLogger("").addHandler(ErrorgapLogHandler())
 ```
+
+## Session replay
+
+Session replay records a timeline of each app session, shown on error groups
+and incidents in Errorgap. It is **timeline only**: no screenshots and no view
+snapshots.
+
+| Event | Recorded when |
+|---|---|
+| `page_load` | The app starts ("App started"), or a new session starts after 30 minutes in the background ("App opened") |
+| `navigation` | A screen is tracked, or the app returns from the background |
+| `api_error` | A call you pass to `Errorgap.recordCall` failed or answered 5xx |
+| `error` | An error is reported, linked to its error group |
+| `exit` | The app goes to the background |
+
+It is on by default when running on Android (off on a plain JVM; pass
+`replay = true` to record there), and records only what the project allows in
+**Settings → Session replay**: nothing while replay is off, and a sampled share
+of sessions while it is on.
+
+This library does not depend on the Android SDK, so wire screens and the app
+lifecycle in your `Application`:
+
+```kotlin
+class App : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        Errorgap.init(config)
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            private var started = 0
+            override fun onActivityStarted(activity: Activity) {
+                if (started++ == 0) Errorgap.appResumed()
+            }
+            override fun onActivityResumed(activity: Activity) {
+                Errorgap.trackScreen(activity.javaClass.simpleName)
+            }
+            override fun onActivityStopped(activity: Activity) {
+                if (--started == 0) Errorgap.appPaused()
+            }
+            override fun onActivityCreated(activity: Activity, state: Bundle?) {}
+            override fun onActivityPaused(activity: Activity) {}
+            override fun onActivitySaveInstanceState(activity: Activity, state: Bundle) {}
+            override fun onActivityDestroyed(activity: Activity) {}
+        })
+    }
+}
+```
+
+In Compose, call `Errorgap.trackScreen("Checkout")` from your navigation
+destination (for example in a `LaunchedEffect`). Record failed calls from an
+OkHttp interceptor:
+
+```kotlin
+class ErrorgapReplayInterceptor : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        return try {
+            chain.proceed(request).also {
+                Errorgap.recordCall(request.method, request.url.toString(), it.code)
+            }
+        } catch (e: IOException) {
+            Errorgap.recordCall(request.method, request.url.toString(), 0, e)
+            throw e
+        }
+    }
+}
+```
+
+Turn it off with `Errorgap.init(config, replay = false)`, and name the app in
+the session list with `replayOptions = ReplayOptions(appName = "Acme")`.
 
 ## Configuration reference
 
