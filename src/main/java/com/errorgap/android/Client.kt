@@ -17,15 +17,32 @@ data class DeliveryResult(
         get() = error == null && status != null && status in 200..299
 }
 
+/** Not sent: the server asked for a pause (`Retry-After`) that has not passed yet. */
+class RateLimitedException : RuntimeException("rate limited by the server, not sent")
+
+private const val MAX_ATTEMPTS = 3
+private const val RETRY_DELAY_MS = 30_000L
+private const val BACKLOG_SIZE = 100
+private const val DEFAULT_RETRY_AFTER_S = 60L
+private const val MAX_RETRY_AFTER_S = 300L
+
 class ErrorgapClient(
     @Volatile private var configuration: ErrorgapConfiguration,
 ) {
     private data class Delivery(
         val resource: String,
         val payload: Map<String, Any?>,
+        val attempt: Int = 1,
+        /** An already encoded body (a stored crash), sent as it is. */
+        val body: ByteArray? = null,
         /** Told the result once the server has answered (session replay links the error to its group). */
         val onDelivered: ((DeliveryResult) -> Unit)? = null,
     )
+
+    /** Sending is paused until this time after a 429 or 503 (`Retry-After`). */
+    @Volatile private var pausedUntil = 0L
+    private val retryTimer by lazy { java.util.Timer("errorgap-retry", true) }
+    private val backlog = AtomicInteger(0)
 
     /**
      * Session replay records each reported error, linked to its group: told the
@@ -56,7 +73,9 @@ class ErrorgapClient(
     ): DeliveryResult {
         return try {
             configuration.validate()
-            val notice = Notice.build(throwable, configuration, withTransaction(options))
+            if (configuration.ignoredEnvironment()) return DeliveryResult(status = 202, body = "ignored environment")
+            val notice = prepare(throwable, options)
+                ?: return DeliveryResult(status = 202, body = "dropped by beforeNotify")
             val observed = errorObserver?.let { observer ->
                 @Suppress("UNCHECKED_CAST")
                 val first = (notice["errors"] as? List<Map<String, Any?>>)?.firstOrNull()
@@ -67,6 +86,77 @@ class ErrorgapClient(
         } catch (caught: Throwable) {
             DeliveryResult(error = caught)
         }
+    }
+
+    /**
+     * The notice for [throwable] after `beforeNotify`, or null when the hook
+     * dropped it. A hook that throws is skipped: a bug in a filter must not
+     * lose the error it was filtering.
+     */
+    internal fun prepare(throwable: Throwable, options: NoticeOptions): Map<String, Any?>? {
+        val notice = Notice.build(throwable, configuration, withTransaction(options))
+        val hook = configuration.beforeNotify ?: return notice
+        return try {
+            hook(notice)
+        } catch (_: Throwable) {
+            notice
+        }
+    }
+
+    /**
+     * Report a crash from the uncaught-exception handler. The notice is
+     * written to `crashDirectory` first, then sent from another thread (the
+     * crashing thread may be the main thread, which must not touch the
+     * network) and the crashing thread waits a moment for it. If the app
+     * dies first, the next launch sends it.
+     */
+    fun notifyCrash(throwable: Throwable, options: NoticeOptions = NoticeOptions(), waitMs: Long = 2_000): DeliveryResult {
+        return try {
+            configuration.validate()
+            if (configuration.ignoredEnvironment()) return DeliveryResult(status = 202, body = "ignored environment")
+            val notice = prepare(throwable, options)
+                ?: return DeliveryResult(status = 202, body = "dropped by beforeNotify")
+            val body = Json.encode(notice)
+            val store = configuration.crashDirectory?.let { CrashStore(it) }
+            val file = store?.write(body)
+
+            var result = DeliveryResult(queued = true, status = 202)
+            val sender = Thread({
+                val sent = send(Delivery("notices", notice, body = body.toByteArray()))
+                if (file != null && delivered(sent)) store.remove(file)
+                result = sent
+            }, "errorgap-crash")
+            sender.isDaemon = true
+            sender.start()
+            sender.join(waitMs)
+            result
+        } catch (caught: Throwable) {
+            DeliveryResult(error = caught)
+        }
+    }
+
+    /** Send the crashes the previous launch could not deliver. Returns how many were sent. */
+    fun sendStoredCrashes(): Int {
+        val store = configuration.crashDirectory?.let { CrashStore(it) } ?: return 0
+        var sent = 0
+        for (file in store.pending()) {
+            val body = runCatching { file.readBytes() }.getOrNull()
+            if (body == null || body.isEmpty()) {
+                store.remove(file)
+                continue
+            }
+            val result = send(Delivery("notices", emptyMap(), body = body))
+            if (!delivered(result)) break
+            store.remove(file)
+            sent++
+        }
+        return sent
+    }
+
+    /** The server has it, or refused it for good: either way do not keep it. */
+    private fun delivered(result: DeliveryResult): Boolean {
+        val status = result.status ?: return false
+        return status < 500 && status != 429
     }
 
     @JvmOverloads
@@ -165,6 +255,7 @@ class ErrorgapClient(
     }
 
     private fun submit(delivery: Delivery, sync: Boolean): DeliveryResult {
+        if (configuration.ignoredEnvironment()) return DeliveryResult(status = 204)
         if (sync || !configuration.async) return deliver(delivery)
         // Count at enqueue time so flush cannot observe an empty queue in the
         // handoff between worker poll and delivery.
@@ -213,11 +304,47 @@ class ErrorgapClient(
     private fun deliver(delivery: Delivery): DeliveryResult {
         val result = send(delivery)
         delivery.onDelivered?.let { runCatching { it(result) } }
+        if (retryable(result)) retryLater(delivery)
         return result
     }
 
+    /**
+     * Network failures and 5xx responses are worth another try. A 4xx is
+     * not: the server understood and refused, and after a 429 the payload is
+     * dropped so a limited project is not sent the same burst again.
+     */
+    internal fun retryable(result: DeliveryResult): Boolean {
+        if (result.error is RateLimitedException) return false
+        if (result.error != null) return true
+        return (result.status ?: 0) >= 500
+    }
+
+    private fun retryLater(delivery: Delivery) {
+        if (delivery.attempt >= MAX_ATTEMPTS || backlog.get() >= BACKLOG_SIZE || !running) return
+        backlog.incrementAndGet()
+        val again = delivery.copy(attempt = delivery.attempt + 1, onDelivered = null)
+        runCatching {
+            retryTimer.schedule(object : java.util.TimerTask() {
+                override fun run() {
+                    backlog.decrementAndGet()
+                    if (!running) return
+                    inFlight.incrementAndGet()
+                    if (!queue.offer(again)) inFlight.decrementAndGet()
+                }
+            }, RETRY_DELAY_MS * delivery.attempt)
+        }.onFailure { backlog.decrementAndGet() }
+    }
+
+    fun paused(): Boolean = System.currentTimeMillis() < pausedUntil
+
+    private fun pauseFor(header: String?) {
+        val seconds = (header?.trim()?.toLongOrNull() ?: DEFAULT_RETRY_AFTER_S).coerceIn(1, MAX_RETRY_AFTER_S)
+        pausedUntil = System.currentTimeMillis() + seconds * 1000
+    }
+
     private fun send(delivery: Delivery): DeliveryResult {
-        val body = Json.encode(delivery.payload).toByteArray()
+        if (paused()) return DeliveryResult(error = RateLimitedException())
+        val body = delivery.body ?: Json.encode(delivery.payload).toByteArray()
         val url = URL(resourceUrl(delivery.resource))
         val connection = url.openConnection() as HttpURLConnection
         return try {
@@ -232,6 +359,7 @@ class ErrorgapClient(
             }
             connection.outputStream.use { it.write(body) }
             val status = connection.responseCode
+            if (status == 429 || status == 503) pauseFor(connection.getHeaderField("Retry-After"))
             val responseBody = (if (status >= 400) connection.errorStream else connection.inputStream)
                 ?.bufferedReader()
                 ?.use { it.readText() }

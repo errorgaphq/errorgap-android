@@ -34,6 +34,13 @@ object Errorgap {
                 recorder.start()
             }
             if (captureGlobals) installHandler() else uninstallHandler()
+            // Crashes the last launch could not deliver.
+            if (configuration.crashDirectory != null) {
+                Thread({ runCatching { newClient.sendStoredCrashes() } }, "errorgap-stored-crashes").apply {
+                    isDaemon = true
+                    start()
+                }
+            }
         }
     }
 
@@ -139,16 +146,18 @@ object Errorgap {
         if (captureGlobalsInstalled) return
         previousHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            client?.notify(
-                throwable,
-                NoticeOptions(
-                    context = mapOf(
-                        "source" to "Thread.UncaughtExceptionHandler",
-                        "thread" to thread.name,
-                    )
-                ),
-                sync = true,
-            )
+            // Stored first, then sent off this thread: see notifyCrash.
+            runCatching {
+                client?.notifyCrash(
+                    throwable,
+                    NoticeOptions(
+                        context = mapOf(
+                            "source" to "Thread.UncaughtExceptionHandler",
+                            "thread" to thread.name,
+                        )
+                    ),
+                )
+            }
             previousHandler?.uncaughtException(thread, throwable)
         }
         captureGlobalsInstalled = true
