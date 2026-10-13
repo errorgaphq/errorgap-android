@@ -71,6 +71,12 @@ class ReplayTests {
         )
     }
 
+    /** The project's settings have been read and answered. */
+    private fun waitForConfig(server: ReplayServer) {
+        waitUntil { server.requests.any { it.path.endsWith("/sessions/config") } }
+        Thread.sleep(100)
+    }
+
     private fun waitUntil(check: () -> Boolean) {
         val deadline = System.currentTimeMillis() + 3_000
         while (System.currentTimeMillis() < deadline && !check()) Thread.sleep(10)
@@ -93,7 +99,7 @@ class ReplayTests {
     fun recordsScreensFailedCallsAndErrorsLinkedToTheirGroup() {
         val server = ReplayServer()
         init(server)
-        waitUntil { server.batches().isNotEmpty() }
+        waitForConfig(server)
 
         Errorgap.trackScreen("Checkout")
         Errorgap.trackScreen("Checkout")
@@ -118,7 +124,7 @@ class ReplayTests {
     fun aShortPauseKeepsTheSession() {
         val server = ReplayServer()
         init(server)
-        waitUntil { server.batches().isNotEmpty() }
+        waitForConfig(server)
         Errorgap.appPaused()
         Errorgap.appResumed()
         Errorgap.notify(RuntimeException("boom"), NoticeOptions())
@@ -129,6 +135,35 @@ class ReplayTests {
         val all = server.batches().joinToString()
         assertTrue(all.contains("App went to the background"))
         assertTrue(all.contains("Returned to the app"))
+    }
+
+    @Test
+    fun sendsNothingForASessionWithoutAnError() {
+        val server = ReplayServer()
+        init(server)
+        waitForConfig(server)
+        Errorgap.trackScreen("Checkout")
+        Errorgap.recordCall("get", "https://api.acme.example/cart", 503)
+        Errorgap.appPaused()
+        Thread.sleep(200)
+        assertTrue(server.batches().isEmpty())
+    }
+
+    @Test
+    fun holdsOnlyTheMostRecentEventsBeforeAnError() {
+        val server = ReplayServer()
+        init(server)
+        waitForConfig(server)
+        repeat(REPLAY_MAX_PENDING_EVENTS + 20) { Errorgap.trackScreen("Screen $it") }
+        Errorgap.notify(RuntimeException("boom"), NoticeOptions())
+        waitUntil { server.batches().joinToString().contains("\"type\":\"error\"") }
+
+        val all = server.batches().joinToString("\n")
+        assertFalse(all.contains("App started"))
+        // "App started" plus 320 screens: the oldest 21 are dropped.
+        assertFalse(all.contains("\"Opened Screen 19\""))
+        assertTrue(all.contains("\"Opened Screen 20\""))
+        assertTrue(all.contains("\"Opened Screen ${REPLAY_MAX_PENDING_EVENTS + 19}\""))
     }
 
     @Test
