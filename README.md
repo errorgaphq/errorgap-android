@@ -16,7 +16,7 @@ Requires Kotlin 1.9+, JDK 17 for build, Android API 24+ at runtime.
 
 ```kotlin
 dependencies {
-    implementation("com.errorgap:errorgap-android:0.5.0")
+    implementation("com.errorgap:errorgap-android:0.6.0")
 }
 ```
 
@@ -196,6 +196,11 @@ It is on by default when running on Android (off on a plain JVM; pass
 `replay = true` to record there), and records only what the project allows in
 **Settings → Session replay**: nothing while replay is off, and a sampled share
 of sessions while it is on.
+
+Only sessions that hit an error are kept. Until an error is reported, the
+session's most recent 300 events are held in memory and nothing is sent; then
+everything held goes up with the error and the rest of the session follows. A
+session that ends without an error is never sent.
 
 This library does not depend on the Android SDK, so wire screens and the app
 lifecycle in your `Application`:

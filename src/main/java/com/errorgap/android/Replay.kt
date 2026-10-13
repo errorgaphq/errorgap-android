@@ -31,6 +31,8 @@ data class ReplayOptions(
 const val REPLAY_BACKGROUND_TIMEOUT_MS: Long = 30 * 60 * 1000
 internal const val REPLAY_MAX_BATCH_EVENTS = 200
 private const val MAX_BUFFERED_EVENTS = 1000
+/** Before the session's first error, only the most recent events are held. */
+internal const val REPLAY_MAX_PENDING_EVENTS = 300
 private const val MAX_LABEL = 200
 
 /**
@@ -38,6 +40,11 @@ private const val MAX_LABEL = 200
  * reported errors and backgrounding. Whether a session is recorded is the
  * project's call: its replay settings are read when each session starts, and
  * a sampled share of sessions is recorded while replay is on.
+ *
+ * Only sessions that hit an error are kept: a session's events are held in
+ * memory and nothing is sent until an error is reported; then everything held
+ * goes up and the rest of the session follows. A session that ends without an
+ * error is never sent.
  */
 class ReplayRecorder internal constructor(
     private val configuration: ErrorgapConfiguration,
@@ -145,7 +152,8 @@ class ReplayRecorder internal constructor(
         var last = final
         while (true) {
             val batch = synchronized(lock) {
-                if (state != State.RECORDING) return
+                // No error yet: keep holding.
+                if (state != State.RECORDING || !hadError) return
                 val take = events.take(REPLAY_MAX_BATCH_EVENTS)
                 events = events.drop(take.size).toMutableList()
                 if (take.isEmpty() && !last) return
@@ -229,7 +237,10 @@ class ReplayRecorder internal constructor(
 
     private fun push(type: String, label: String, t: Int? = null, groupId: String? = null) {
         synchronized(lock) {
-            if ((state != State.PENDING && state != State.RECORDING) || events.size >= MAX_BUFFERED_EVENTS) return
+            if (state != State.PENDING && state != State.RECORDING) return
+            // Before an error, the recent past matters most: drop the oldest.
+            if (!hadError && events.size >= REPLAY_MAX_PENDING_EVENTS) events.removeAt(0)
+            if (events.size >= MAX_BUFFERED_EVENTS) return
             events.add(
                 mutableMapOf<String, Any?>(
                     "t" to (t ?: offset()),
