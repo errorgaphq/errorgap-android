@@ -16,7 +16,7 @@ Requires Kotlin 1.9+, JDK 17 for build, Android API 24+ at runtime.
 
 ```kotlin
 dependencies {
-    implementation("com.errorgap:errorgap-android:0.7.0")
+    implementation("com.errorgap:errorgap-android:0.7.1")
 }
 ```
 
