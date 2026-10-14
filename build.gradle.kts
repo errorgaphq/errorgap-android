@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.errorgap"
-version = "0.6.0"
+version = "0.7.0"
 
 java {
     toolchain {
@@ -29,6 +29,9 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    // The fake servers in these tests record every request; the settings
+    // poll is exercised on its own in RemoteSettingsTests.
+    environment("ERRORGAP_REMOTE_SETTINGS", "false")
 }
 
 mavenPublishing {

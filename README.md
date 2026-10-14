@@ -16,7 +16,7 @@ Requires Kotlin 1.9+, JDK 17 for build, Android API 24+ at runtime.
 
 ```kotlin
 dependencies {
-    implementation("com.errorgap:errorgap-android:0.6.0")
+    implementation("com.errorgap:errorgap-android:0.7.0")
 }
 ```
 
@@ -56,6 +56,49 @@ class App : Application() {
 
 By default `init` installs `Thread.setDefaultUncaughtExceptionHandler`;
 pass `captureGlobals = false` to skip.
+
+## Crashes
+
+An uncaught exception usually ends the app before a report can be sent, and
+the main thread may not use the network at all. Give the SDK a directory and
+it writes the crash there first, sends it from a background thread, and
+delivers it on the next launch if the app died before the request finished:
+
+```kotlin
+Errorgap.init(
+    ErrorgapConfiguration(
+        projectSlug = "my-app",
+        crashDirectory = applicationContext.filesDir.path,
+    )
+)
+```
+
+## Remote settings
+
+Errors, performance data and logs can each be switched off for a project in
+errorgap (Project settings › What SDKs send). Installed apps follow within ten
+minutes of running, with no new release. If errorgap cannot be reached,
+everything stays on. `remoteSettings = false` ignores the project's switches.
+
+## Filtering, hooks and delivery
+
+```kotlin
+ErrorgapConfiguration(
+    projectSlug = "my-app",
+    ignoreEnvironments = listOf("debug"),
+    beforeNotify = { notice ->
+        val type = (notice["errors"] as List<Map<String, Any?>>).first()["type"]
+        if (type == "CancellationException") null else notice   // null drops it
+    },
+)
+
+Errorgap.notify(error, NoticeOptions(userId = account.id, userEmail = account.email))
+```
+
+`filterKeys` are masked at any depth in `params` and `session`, and oversized
+values are cut. A send that fails on the network or with a 5xx is retried up
+to three times; after a 429 the SDK stops sending for the server's
+`Retry-After`.
 
 ## Manual notification
 

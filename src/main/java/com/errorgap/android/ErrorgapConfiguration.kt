@@ -24,7 +24,28 @@ data class ErrorgapConfiguration(
      * on Android should pass `DeviceInfo.fromAndroid(context)` here.
      */
     val deviceInfo: Map<String, Any?> = emptyMap(),
+    /**
+     * Where crashes are kept until they are delivered, so one that kills the
+     * app before the request finishes is sent on the next launch. On Android
+     * pass `context.filesDir.path`. Without it a crash is only sent if the
+     * request completes before the process dies.
+     */
+    val crashDirectory: String? = null,
+    /** Environments in which nothing is sent. */
+    val ignoreEnvironments: List<String> = envList("ERRORGAP_IGNORE_ENVIRONMENTS"),
+    /**
+     * Sees each notice before it is sent and returns the notice to send
+     * (changed or not), or `null` to drop it.
+     */
+    val beforeNotify: ((Map<String, Any?>) -> Map<String, Any?>?)? = null,
+    /**
+     * Follow the project's settings in errorgap (Project settings › What SDKs
+     * send): stop sending what is switched off there.
+     */
+    val remoteSettings: Boolean = System.getenv("ERRORGAP_REMOTE_SETTINGS")?.trim()?.lowercase() != "false",
 ) {
+    fun ignoredEnvironment(): Boolean = ignoreEnvironments.contains(environment)
+
     fun validate() {
         require(!projectSlug.isNullOrBlank()) { "Errorgap projectSlug is required" }
         require(endpoint.isNotBlank()) { "Errorgap endpoint is required" }
@@ -37,6 +58,9 @@ data class ErrorgapConfiguration(
             "password", "password_confirmation", "token", "secret",
             "api_key", "authorization", "cookie",
         )
+
+        private fun envList(key: String): List<String> =
+            (System.getenv(key) ?: "").split(",").map { it.trim() }.filter { it.isNotEmpty() }
 
         private fun envBoolean(key: String, fallback: Boolean): Boolean =
             System.getenv(key)?.trim()?.lowercase()?.let {
