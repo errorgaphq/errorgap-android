@@ -16,8 +16,20 @@ class FakeIngestor(private val status: Int = 201) : AutoCloseable {
     private val server: HttpServer = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
     private val captured = ConcurrentLinkedQueue<CapturedRequest>()
 
+    /** The JSON served to the SDK's settings poll; null answers 404. */
+    @Volatile var settings: String? = null
+
     init {
         server.createContext("/") { exchange ->
+            // The SDK's settings poll is not an ingest request: answered from
+            // `settings` (404 when unset) and not recorded.
+            if (exchange.requestMethod == "GET") {
+                val body = settings?.toByteArray()
+                exchange.sendResponseHeaders(if (body == null) 404 else 200, body?.size?.toLong() ?: -1)
+                body?.let { bytes -> exchange.responseBody.use { it.write(bytes) } }
+                exchange.close()
+                return@createContext
+            }
             val body = exchange.requestBody.readBytes().toString(Charsets.UTF_8)
             val headers = exchange.requestHeaders.entries
                 .associate { (k, v) -> k.lowercase() to v.first() }

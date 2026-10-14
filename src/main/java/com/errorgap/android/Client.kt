@@ -59,6 +59,9 @@ class ErrorgapClient(
         start()
     }
 
+    /** What errorgap wants this app to send (the project's remote settings). */
+    val remote = RemoteSettings { configuration }
+
     fun configuration(): ErrorgapConfiguration = configuration
 
     fun configure(configuration: ErrorgapConfiguration) {
@@ -74,6 +77,9 @@ class ErrorgapClient(
         return try {
             configuration.validate()
             if (configuration.ignoredEnvironment()) return DeliveryResult(status = 202, body = "ignored environment")
+            if (!remote.enabled(RemoteSettings.Kind.ERRORS)) {
+                return DeliveryResult(status = 202, body = "errors are switched off for this project")
+            }
             val notice = prepare(throwable, options)
                 ?: return DeliveryResult(status = 202, body = "dropped by beforeNotify")
             val observed = errorObserver?.let { observer ->
@@ -174,6 +180,7 @@ class ErrorgapClient(
             ) {
                 DeliveryResult(status = 204)
             } else {
+                if (!remote.enabled(RemoteSettings.Kind.APM)) return DeliveryResult(status = 204)
                 submit(Delivery("transactions", transaction.toMap(config)), sync)
             }
         } catch (caught: Throwable) {
@@ -204,6 +211,7 @@ class ErrorgapClient(
                     "occurred_at" to isoTimestamp(),
                 )
                 source?.takeIf { it.isNotBlank() }?.let { payload["source"] = it }
+                if (!remote.enabled(RemoteSettings.Kind.LOGS)) return DeliveryResult(status = 204)
                 submit(Delivery("logs", payload), sync)
             }
         } catch (caught: Throwable) {
@@ -279,6 +287,7 @@ class ErrorgapClient(
     fun shutdown(timeoutMs: Long) {
         flush(timeoutMs)
         running = false
+        remote.stop()
         worker.interrupt()
         worker.join(timeoutMs)
     }

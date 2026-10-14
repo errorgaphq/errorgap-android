@@ -38,6 +38,11 @@ data class ErrorgapConfiguration(
      * (changed or not), or `null` to drop it.
      */
     val beforeNotify: ((Map<String, Any?>) -> Map<String, Any?>?)? = null,
+    /**
+     * Follow the project's settings in errorgap (Project settings › What SDKs
+     * send): stop sending what is switched off there.
+     */
+    val remoteSettings: Boolean = System.getenv("ERRORGAP_REMOTE_SETTINGS")?.trim()?.lowercase() != "false",
 ) {
     fun ignoredEnvironment(): Boolean = ignoreEnvironments.contains(environment)
 
