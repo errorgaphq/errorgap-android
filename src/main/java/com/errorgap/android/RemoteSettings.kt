@@ -29,8 +29,15 @@ class RemoteSettings internal constructor(private val configuration: () -> Error
         return kind !in off
     }
 
-    /** Fetch now, on this thread. Returns whether the settings could be read. */
-    fun refresh(): Boolean {
+    /**
+     * Fetch now, on this thread. Returns whether the settings could be read.
+     * One read at a time, so an older answer can never overwrite a newer one.
+     */
+    fun refresh(): Boolean = synchronized(refreshLock) { read() }
+
+    private val refreshLock = Any()
+
+    private fun read(): Boolean {
         val config = configuration()
         var connection: HttpURLConnection? = null
         return try {
